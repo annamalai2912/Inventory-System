@@ -22,13 +22,27 @@ export function AuthPage() {
 
     if (tab === 'login') {
       const { error: err } = await signIn(email, password);
-      if (err) setError(err);
-      else navigate('/');
+      if (err) {
+        if (err.toLowerCase().includes('rate limit')) {
+          setError('Supabase email rate limit reached. Turn off "Confirm Email" in your Supabase Auth settings to bypass.');
+        } else {
+          setError(err);
+        }
+      } else {
+        navigate('/');
+      }
     } else {
       if (!name.trim()) { setError('Name is required'); return; }
       const { error: err } = await signUp(email, password, name);
-      if (err) setError(err);
-      else setSuccess('Account created! Check your email to confirm, then log in.');
+      if (err) {
+        if (err.toLowerCase().includes('rate limit')) {
+          setError('Email rate limit reached on Supabase. Go to Supabase Dashboard -> Authentication -> Providers -> Email and disable "Confirm Email".');
+        } else {
+          setError(err);
+        }
+      } else {
+        setSuccess('Account created successfully! You can now log in.');
+      }
     }
   };
 
