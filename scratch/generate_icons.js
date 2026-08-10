@@ -1,0 +1,18 @@
+import fs from 'fs';
+
+const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="110" fill="#059669"/>
+  <path d="M160 160 C160 134 184 110 210 110 H302 C328 110 352 134 352 160 V230 C352 256 328 280 302 280 H210 C184 280 160 256 160 230 V160 Z" stroke="#ffffff" stroke-width="28" fill="none"/>
+  <path d="M160 280 C160 254 184 230 210 230 H302 C328 230 352 254 352 280 V350 C352 376 328 400 302 400 H210 C184 400 160 376 160 350 V280 Z" stroke="#a7f3d0" stroke-width="28" fill="none"/>
+  <circle cx="210" cy="160" r="24" fill="#ffffff"/>
+  <circle cx="302" cy="160" r="24" fill="#34d399"/>
+  <circle cx="210" cy="350" r="24" fill="#34d399"/>
+  <circle cx="302" cy="350" r="24" fill="#ffffff"/>
+</svg>`;
+
+fs.writeFileSync('public/icon.svg', svgContent);
+fs.writeFileSync('public/icon-192.png', svgContent);
+fs.writeFileSync('public/icon-512.png', svgContent);
+fs.writeFileSync('public/icon-maskable.png', svgContent);
+
+console.log('Icons generated successfully.');
