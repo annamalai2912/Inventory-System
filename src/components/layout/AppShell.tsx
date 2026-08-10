@@ -96,6 +96,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
 
+      {/* ── Mobile Top Header ── */}
+      <header className="mobile-header">
+        <BrandLogo size={32} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)' }}>
+          <div className="avatar" style={{ width: 32, height: 32, fontSize: '0.75rem' }}>{initials}</div>
+          <button
+            onClick={signOut}
+            className="btn btn-ghost btn-sm"
+            style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--text-muted)' }}
+            id="mobile-btn-signout"
+            title="Sign out"
+          >
+            <LogOut size={15} />
+          </button>
+        </div>
+      </header>
+
       {/* ── Main Content ── */}
       <main className="main-content">
         {children}
@@ -111,8 +128,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             className={({ isActive }) => `mobile-nav-item${isActive ? ' active' : ''}`}
             id={`mobile-nav-${label.toLowerCase().replace(/\s+/g, '-')}`}
           >
-            <Icon size={18} />
-            {label === 'Admin Stream' ? 'Admin' : label}
+            <Icon size={20} />
+            <span style={{ fontSize: '0.68rem', marginTop: 2 }}>{label === 'Admin Stream' ? 'Admin' : label}</span>
           </NavLink>
         ))}
         <button
@@ -120,8 +137,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           onClick={() => navigate('/add')}
           id="mobile-nav-add"
         >
-          <PlusCircle size={18} />
-          Add
+          <PlusCircle size={20} />
+          <span style={{ fontSize: '0.68rem', marginTop: 2 }}>Add</span>
         </button>
       </nav>
     </div>

@@ -90,7 +90,7 @@ export function ComponentDetailPage() {
       </div>
 
       {/* Main layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 'var(--sp-6)', alignItems: 'start' }}>
+      <div className="detail-grid">
         {/* Left col — image + quantity */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)' }}>
           {component.image_urls?.length > 0
