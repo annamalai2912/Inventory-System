@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
-import { ArrowLeft, Upload, X, Save, Loader } from 'lucide-react';
+import { ArrowLeft, Upload, X, Save, Loader, Camera } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useAuthStore } from '../store/auth.store';
 import { useComponentsStore } from '../store/components.store';
 import { useToast } from '../components/ui/Toast';
+import { CameraModal } from '../components/ui/CameraModal';
 import { DuplicateWarning } from '../components/ui/DuplicateWarning';
 import { findDuplicates } from '../lib/fuzzy';
 import { CATEGORIES } from '../types';
@@ -34,7 +35,10 @@ export function AddEditComponentPage() {
   const [duplicates, setDuplicates] = useState<DuplicateMatch[]>([]);
   const [ignoreWarning, setIgnoreWarning] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const [isCameraOpen, setIsCameraOpen] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
 
   const {
     register, handleSubmit, watch, setValue,
@@ -66,15 +70,26 @@ export function AddEditComponentPage() {
     setDuplicates(matches);
   }, [watchedName, watchedCategory, ignoreWarning]);
 
-  // Image preview
+  // Add images to state
   const addImages = (files: FileList | File[]) => {
-    const arr = Array.from(files).slice(0, 5 - imageFiles.length);
+    const arr = Array.from(files).slice(0, 5 - (imageFiles.length + existingImageUrls.length));
+    if (arr.length === 0) return;
+
     setImageFiles((prev) => [...prev, ...arr]);
-    arr.forEach((f) => {
+    arr.forEach((file) => {
       const reader = new FileReader();
-      reader.onload = (e) => setImagePreviews((p) => [...p, e.target?.result as string]);
-      reader.readAsDataURL(f);
+      reader.onload = (e) => {
+        if (e.target?.result) {
+          setImagePreviews((p) => [...p, e.target!.result as string]);
+        }
+      };
+      reader.readAsDataURL(file);
     });
+  };
+
+  const handleCameraCapture = (file: File, dataUrl: string) => {
+    setImageFiles((prev) => [...prev, file]);
+    setImagePreviews((prev) => [...prev, dataUrl]);
   };
 
   const removeNewImage = (i: number) => {
@@ -85,20 +100,23 @@ export function AddEditComponentPage() {
   const removeExistingImage = (url: string) =>
     setExistingImageUrls((p) => p.filter((u) => u !== url));
 
-  const uploadImages = async (componentId: string): Promise<string[]> => {
-    const urls: string[] = [];
-    for (const file of imageFiles) {
-      const ext = file.name.split('.').pop();
-      const path = `${componentId}/${Date.now()}.${ext}`;
+  // Bulletproof image processor: tries Supabase storage, falls back to optimized Base64
+  const processImageFile = async (file: File, previewUrl: string, compId: string): Promise<string> => {
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${compId}/${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`;
       const { error } = await supabase.storage
         .from('component-images')
         .upload(path, file, { upsert: true });
+
       if (!error) {
         const { data } = supabase.storage.from('component-images').getPublicUrl(path);
-        urls.push(data.publicUrl);
+        if (data?.publicUrl) return data.publicUrl;
       }
+    } catch (err) {
+      console.warn('Storage upload error, using inline image string fallback:', err);
     }
-    return urls;
+    return previewUrl;
   };
 
   const onSubmit = async (data: FormData) => {
@@ -108,7 +126,7 @@ export function AddEditComponentPage() {
     }
     setSaving(true);
 
-    const payload: Partial<Component> = {
+    const initialPayload: Partial<Component> = {
       ...(id ? { id } : {}),
       name: data.name.trim(),
       category: data.category,
@@ -120,17 +138,25 @@ export function AddEditComponentPage() {
       image_urls: existingImageUrls,
     };
 
-    const { error: upsertErr, id: compId } = await upsertComponent(payload);
+    // First upsert component row
+    const { error: upsertErr, id: compId } = await upsertComponent(initialPayload);
     if (upsertErr || !compId) {
       toast.error(upsertErr ?? 'Failed to save component');
       setSaving(false);
       return;
     }
 
+    // Process new images
     if (imageFiles.length > 0) {
-      const newUrls = await uploadImages(compId);
-      const allUrls = [...existingImageUrls, ...newUrls];
-      await supabase.from('components').update({ image_urls: allUrls }).eq('id', compId);
+      const uploadedUrls: string[] = [];
+      for (let i = 0; i < imageFiles.length; i++) {
+        const url = await processImageFile(imageFiles[i], imagePreviews[i], compId);
+        uploadedUrls.push(url);
+      }
+      const finalUrls = [...existingImageUrls, ...uploadedUrls];
+      await supabase.from('components').update({ image_urls: finalUrls }).eq('id', compId);
+      // update local store
+      useComponentsStore.getState().fetchComponents();
     }
 
     setSaving(false);
@@ -140,6 +166,13 @@ export function AddEditComponentPage() {
 
   return (
     <div className="animate-fade-in" style={{ maxWidth: 700 }}>
+      {/* Camera Modal */}
+      <CameraModal
+        isOpen={isCameraOpen}
+        onClose={() => setIsCameraOpen(false)}
+        onCapture={handleCameraCapture}
+      />
+
       {/* Header */}
       <div className="flex items-center gap-4 mb-6">
         <button className="btn btn-ghost" onClick={() => navigate(-1)} id="btn-back-form">
@@ -219,23 +252,29 @@ export function AddEditComponentPage() {
             </div>
           </div>
 
-          {/* Images */}
+          {/* Component Photos */}
           <div className="card">
-            <div className="section-label mb-4">Images</div>
+            <div className="section-label mb-4" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Component Photos</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {existingImageUrls.length + imageFiles.length} / 5 photos
+              </span>
+            </div>
 
             {/* Existing images */}
             {existingImageUrls.length > 0 && (
-              <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }}>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', marginBottom: 'var(--sp-4)' }}>
                 {existingImageUrls.map((url) => (
                   <div key={url} style={{ position: 'relative' }}>
-                    <img src={url} alt="existing" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }} />
+                    <img src={url} alt="existing" style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }} />
                     <button
                       type="button"
                       className="btn btn-danger btn-icon"
-                      style={{ position: 'absolute', top: -6, right: -6, padding: 3, borderRadius: '50%', width: 20, height: 20, fontSize: 10 }}
+                      style={{ position: 'absolute', top: -6, right: -6, padding: 3, borderRadius: '50%', width: 22, height: 22, fontSize: 10 }}
                       onClick={() => removeExistingImage(url)}
+                      title="Remove image"
                     >
-                      <X size={10} />
+                      <X size={12} />
                     </button>
                   </div>
                 ))}
@@ -244,40 +283,85 @@ export function AddEditComponentPage() {
 
             {/* New previews */}
             {imagePreviews.length > 0 && (
-              <div style={{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap', marginBottom: 'var(--sp-3)' }}>
+              <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', marginBottom: 'var(--sp-4)' }}>
                 {imagePreviews.map((src, i) => (
                   <div key={i} style={{ position: 'relative' }}>
-                    <img src={src} alt="new" style={{ width: 72, height: 72, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '1px solid var(--border)' }} />
+                    <img src={src} alt="new preview" style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 'var(--r-md)', border: '2px solid var(--emerald-500)' }} />
                     <button
                       type="button"
                       className="btn btn-danger btn-icon"
-                      style={{ position: 'absolute', top: -6, right: -6, padding: 3, borderRadius: '50%', width: 20, height: 20, fontSize: 10 }}
+                      style={{ position: 'absolute', top: -6, right: -6, padding: 3, borderRadius: '50%', width: 22, height: 22, fontSize: 10 }}
                       onClick={() => removeNewImage(i)}
+                      title="Remove preview"
                     >
-                      <X size={10} />
+                      <X size={12} />
                     </button>
                   </div>
                 ))}
               </div>
             )}
 
+            {/* Photo Action Zone */}
             <div
               className={`dropzone${dragging ? ' dragging' : ''}`}
               onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
               onDragLeave={() => setDragging(false)}
               onDrop={(e) => { e.preventDefault(); setDragging(false); addImages(e.dataTransfer.files); }}
-              onClick={() => fileInputRef.current?.click()}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--sp-3)', padding: 'var(--sp-6)' }}
             >
-              <Upload size={24} className="dropzone-icon" />
-              <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-main)' }}>
-                Click or drag images here
+              <div style={{ display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {/* Live Camera Button */}
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={(e) => { e.stopPropagation(); setIsCameraOpen(true); }}
+                  id="btn-open-camera"
+                  style={{ gap: 8, padding: '10px 18px' }}
+                >
+                  <Camera size={18} /> Take Picture in Site
+                </button>
+
+                {/* Choose Files Button */}
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}
+                  id="btn-upload-files"
+                  style={{ gap: 8, padding: '10px 18px' }}
+                >
+                  <Upload size={18} /> Choose File
+                </button>
+
+                {/* Mobile Camera Shutter Fallback */}
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={(e) => { e.stopPropagation(); cameraInputRef.current?.click(); }}
+                  id="btn-mobile-camera-input"
+                  style={{ gap: 6, fontSize: '0.8rem', color: 'var(--text-muted)' }}
+                >
+                  <Camera size={15} /> Device Camera App
+                </button>
               </div>
-              <span className="dropzone-hint">PNG, JPG up to 5MB (Max 5 photos)</span>
+
+              <span className="dropzone-hint" style={{ marginTop: 4 }}>
+                Drag & drop photos or capture directly via webcam / phone camera
+              </span>
+
+              {/* Hidden File Inputs */}
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
                 multiple
+                style={{ display: 'none' }}
+                onChange={(e) => e.target.files && addImages(e.target.files)}
+              />
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
                 style={{ display: 'none' }}
                 onChange={(e) => e.target.files && addImages(e.target.files)}
               />
